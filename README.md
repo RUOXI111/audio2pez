@@ -186,3 +186,7 @@ python main.py song.mp3 --outdir my_charts
 # 偏移调整（用于音画同步）
 python main.py song.mp3 --offset 50
 ```
+
+
+## 注 意
+目前学习了一定的制谱技巧，但本质上只是一种符合节拍的随机notes生成器。各类判定线动效是实现不了的（也许有一天？）
