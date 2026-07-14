@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated output
+output/
+output_easy/
+
+# Media files (user's personal audio/images)
+*.mp3
+*.wav
+*.ogg
+*.flac
+*.jpg
+*.jpeg
+*.png
+
+# PEZ packages (generated)
+*.pez
+
+# IDE
+.vscode/
+.idea/
