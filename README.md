@@ -66,7 +66,7 @@ python main.py song.mp3 --bpm-only
 
 如果你已经有“踩音”之后的音符时序（例如来自其它工具或外部模型），可以跳过音频检测，直接让 charter 自动排布 notes 并打包。
 （关于这点，我个人推荐Rana踩音模型，详见：
-【Ai也能给音游踩音？全音游通用！玩游戏不求人】 https://www.bilibili.com/video/BV12PNG6dEtW）
+【Ai也能给音游踩音？全音游通用！玩游戏不求人】 https://www.bilibili.com/video/BV12PNG6dEtW ）
 
 ```bash
 # 仅用 points 排布
