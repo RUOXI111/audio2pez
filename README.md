@@ -1,7 +1,7 @@
 ﻿# audio2pez — 音频转 PhiraEdit 谱面生成器
 
 把任意音频文件（.mp3 / .wav / .ogg / .flac）自动分析并生成 RPE (Re:PhiEdit) 格式的 Phira 谱面（.pez）。
-它只依赖 librosa / numpy 等通用音频库，**不依赖任何外部踩音模型、神经网络或网络服务**，完全离线运行。
+只依赖 librosa / numpy 等通用音频库，完全离线运行。
 
 ## 特性
 
@@ -65,6 +65,8 @@ python main.py song.mp3 --bpm-only
 ## 从踩音 points 排布（无需音频检测）
 
 如果你已经有“踩音”之后的音符时序（例如来自其它工具或外部模型），可以跳过音频检测，直接让 charter 自动排布 notes 并打包。
+（关于这点，我个人推荐Rana踩音模型，详见：
+【Ai也能给音游踩音？全音游通用！玩游戏不求人】 https://www.bilibili.com/video/BV12PNG6dEtW）
 
 ```bash
 # 仅用 points 排布
@@ -127,6 +129,9 @@ output/
 - 判定线锚点在屏幕中心，`X∈[-675,675]`、`Y∈[-450,450]`。
 - 装饰/动效线用 `isCover=True + isFake=1`（假音符不判定），保证渲染且不干扰计分。
 - alpha 全部用 `0~255`，不出现负值；需要“默认透明、只在事件时发光”的线会在首段前加前导 0 段。
+
+## 2026/8/27
+- 重载了原本的排谱逻辑。
 
 ## 授权
 
