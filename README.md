@@ -62,6 +62,37 @@ python main.py song.mp3 --bpm-only
 
 此外可用 `--tap-weight / --hold-weight / --flick-weight / --drag-weight` 覆盖各难度音符类型权重。
 
+## 从踩音 points 排布（无需音频检测）
+
+如果你已经有“踩音”之后的音符时序（例如来自其它工具或外部模型），可以跳过音频检测，直接让 charter 自动排布 notes 并打包。
+
+```bash
+# 仅用 points 排布
+python main.py --from-points notes.json
+
+# 同时提供音频，让音符类型/轨道/段落更贴合音乐
+python main.py --from-points notes.json song.mp3
+```
+
+points JSON 结构（与 `detector.py` 输出一致）：
+
+```json
+{
+  "bpm": 128.0,
+  "ticks_per_beat": 480,
+  "tempo_events": [{"beat_tick": 0, "bpm": 128.0}],
+  "offset_sec": 0.0,
+  "duration_sec": 20.0,
+  "points": [
+    {"time_sec": 0.5, "beat": 1.0, "beat_tick": 480, "probability": 0.8, "snap_status": 1}
+  ]
+}
+```
+
+- `points` 允许只给 `time_sec`（会自动按 `bpm` 换算成 `beat`/`beat_tick`）。
+- 无音频时，`charter` 会用 points 密度推断段落、用 probability 推断能量；类型/选轨的音乐感弱一些，但仍能排布出可玩谱面。
+- 提供 `song.mp3` 作第二参数时，走完整音频分析（频段 / onset / 段落），类型与轨道更准确。
+
 ## 工作流程
 
 ```

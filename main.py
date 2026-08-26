@@ -1,17 +1,18 @@
-# -*- coding: utf-8 -*-
-"""audio2pez 命令行入口：把任意音频转成可导入 Phira 的 .pez。
+﻿# -*- coding: utf-8 -*-
+"""audio2pez 命令行入口。
 
-用法:
-  python main.py song.mp3
-  python main.py song.mp3 --difficulty hard --line-fx mix
-  python main.py song.mp3 --all-tiers --key 4k
+两种模式：
+  1) 从音频直接生成：python main.py song.mp3
+  2) 从已踩音 points 排布：python main.py --from-points notes.json
+       （可加 song.mp3 作为 --input 以提升音符类型/轨道质量）
 """
 
 import argparse
+import json
 import os
 import sys
 
-from generate import generate
+from generate import generate, arrange
 from config import DIFFICULTY_PRESETS
 
 LINE_FX = ["none", "alpha_pulse", "pinwheel", "grid", "curve", "color_flow",
@@ -21,11 +22,18 @@ KEYS = ["auto", "2k", "4k", "6k"]
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="audio2pez - 音频转 PhiraEdit 谱面生成器",
+        description="audio2pez - 音频转 PhiraEdit 谱面生成器 / 从踩音 points 排布",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="示例:\n"
+               "  python main.py song.mp3                         # 音频直接生成\n"
+               "  python main.py --from-points notes.json         # 用踩音 points 排布\n"
+               "  python main.py --from-points notes.json song.mp3  # 附带音频提升质量",
     )
-    parser.add_argument("input", help="输入音频文件 (.mp3/.wav/.ogg/.flac)")
-    parser.add_argument("--bpm", type=float, default=None, help="手动指定 BPM（不指定则自动检测）")
+    parser.add_argument("input", nargs="?", default=None,
+                        help="输入音频文件（配合 --from-points 时可选，用于提升质量）")
+    parser.add_argument("--from-points", default=None,
+                        help="直接输入踩音后的 points JSON（含 points/bpm），跳过音频检测")
+    parser.add_argument("--bpm", type=float, default=None, help="手动指定 BPM（不指定则自动检测/取 JSON）")
     parser.add_argument("--difficulty", default="hard", choices=list(DIFFICULTY_PRESETS),
                         help="难度分级")
     parser.add_argument("--all-tiers", action="store_true", help="一次输出全部 5 档难度")
@@ -51,15 +59,8 @@ def main(argv=None):
     parser.add_argument("--drag-weight", type=float, default=None)
     args = parser.parse_args(argv)
 
-    audio = os.path.abspath(args.input)
-    if not os.path.exists(audio):
-        print(f"错误: 文件不存在 {audio}", file=sys.stderr)
-        return 1
-
-    out = generate(
-        audio_path=audio,
+    common = dict(
         difficulty=args.difficulty,
-        bpm=args.bpm,
         all_tiers=args.all_tiers,
         image_path=args.cover,
         title=(args.name or "").strip() or None,
@@ -79,6 +80,28 @@ def main(argv=None):
         flick_weight=args.flick_weight,
         drag_weight=args.drag_weight,
     )
+
+    if args.from_points:
+        if not os.path.exists(args.from_points):
+            print(f"错误: points 文件不存在 {args.from_points}", file=sys.stderr)
+            return 1
+        with open(args.from_points, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        audio = os.path.abspath(args.input) if args.input else None
+        if audio and not os.path.exists(audio):
+            print(f"错误: 音频文件不存在 {audio}", file=sys.stderr)
+            return 1
+        out = arrange(data, audio_path=audio, bpm=args.bpm, **common)
+    else:
+        if not args.input:
+            print("错误: 需要提供输入音频，或使用 --from-points 传入踩音 points。", file=sys.stderr)
+            return 1
+        audio = os.path.abspath(args.input)
+        if not os.path.exists(audio):
+            print(f"错误: 文件不存在 {audio}", file=sys.stderr)
+            return 1
+        out = generate(audio_path=audio, bpm=args.bpm, **common)
+
     print("=" * 64)
     for tier, path in out["results"].items():
         print(f"  [{tier}] {path}")

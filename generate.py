@@ -1,12 +1,22 @@
-# -*- coding: utf-8 -*-
-"""audio2pez 流水线：音频检测 -> 频谱/段落分析 -> 难度分级排布 -> 打包 .pez。"""
+﻿# -*- coding: utf-8 -*-
+"""audio2pez 流水线：音频检测 -> 频谱/段落分析 -> 难度分级排布 -> 打包 .pez。
+
+也可以只提供“踩音”后的音符时序 points（不再检测音频），由 charter 自动排布成谱面。
+"""
 
 import re
 import hashlib
 import time
+import statistics
 from pathlib import Path
 
-from config import DIFFICULTY_PRESETS, LANES_2, LANES_4, LANES_6
+import numpy as np
+
+from config import (
+    DIFFICULTY_PRESETS, LANES_2, LANES_4, LANES_6,
+    SAMPLE_RATE, HOP_LENGTH, SECTION_WINDOW,
+    DENSITY_LOW, DENSITY_MID, DENSITY_HIGH,
+)
 from detector import detect_result
 from audio_analyze import analyze_audio
 from charter import Charter
@@ -72,51 +82,113 @@ def _safe_id(name: str) -> str:
     return f"{slug[:24]}_{digest}"
 
 
-def generate(
-    audio_path: str,
-    difficulty: str = "hard",
-    bpm: float = None,
-    all_tiers: bool = False,
-    image_path: str = None,
-    title: str = None,
-    artist: str = "",
-    charter_name: str = None,
-    outdir: str = None,
-    density_mult: float = 1.0,
-    line_fx: str = "none",
-    pulse_style: str = "chain",
-    deco_when: str = "intro_chorus",
-    main_y: float = -300.0,
-    mix_spec: str = "",
-    key_mode: str = "auto",
-    main_swing: bool = None,
-    sweep_flick_only: bool = False,
-    disable_drag: bool = False,
-    tap_weight: float = None,
-    hold_weight: float = None,
-    flick_weight: float = None,
-    drag_weight: float = None,
-) -> dict:
-    """返回 {tier: pez_path} 与日志文本。"""
+# ── points 归一化 ────────────────────────────────────────────────────────────
+def normalize_points(points: list, bpm: float, ticks_per_beat: int) -> list:
+    """确保每个点都有 time_sec / beat / beat_tick / probability / snap_status。"""
+    tpb = int(ticks_per_beat or 480)
+    bpm = float(bpm) if bpm and bpm > 0 else 120.0
+    out = []
+    for p in points or []:
+        t = float(p.get("time_sec", 0.0))
+        if "beat_tick" in p and p.get("beat_tick") is not None:
+            tick = int(p["beat_tick"])
+        else:
+            tick = int(round(t * bpm / 60.0 * tpb))
+        beat = float(p.get("beat", tick / tpb))
+        prob = float(p.get("probability", 0.4))
+        out.append({
+            "time_sec": t,
+            "beat": beat,
+            "beat_tick": tick,
+            "probability": max(0.05, min(1.0, prob)),
+            "snap_status": int(p.get("snap_status", 1)),
+        })
+    return out
+
+
+def coerce_points_dict(data, bpm: float = None) -> dict:
+    """把用户输入（dict 含 points，或纯 list）统一成 result dict。"""
+    if isinstance(data, dict):
+        bpm = float(data.get("bpm") or bpm or 120.0)
+        ticks = int(data.get("ticks_per_beat") or 480)
+        points = normalize_points(data.get("points", []), bpm, ticks)
+        if not data.get("duration_sec"):
+            mx = max((p["time_sec"] for p in points), default=0.0)
+            dur = mx + 60.0 / bpm * 2.0
+        else:
+            dur = float(data["duration_sec"])
+        return {
+            "bpm": bpm,
+            "bpm_changes": data.get("bpm_changes", []),
+            "tempo_events": data.get("tempo_events") or [{"beat_tick": 0, "bpm": bpm}],
+            "offset_sec": float(data.get("offset_sec", 0.0)),
+            "ticks_per_beat": ticks,
+            "duration_sec": dur,
+            "points": points,
+        }
+    # 纯 list
+    bpm = float(bpm or 120.0)
+    ticks = 480
+    points = normalize_points(data, bpm, ticks)
+    dur = max((p["time_sec"] for p in points), default=0.0) + 60.0 / bpm * 2.0
+    return {
+        "bpm": bpm, "bpm_changes": [], "tempo_events": [{"beat_tick": 0, "bpm": bpm}],
+        "offset_sec": 0.0, "ticks_per_beat": ticks, "duration_sec": dur, "points": points,
+    }
+
+
+# ── 无音频时的兜底分析（用 points 推断段落/能量）─────────────────────────────
+def fallback_audio(points: list, bpm: float, duration_sec: float) -> dict:
+    sr = int(SAMPLE_RATE); hop = int(HOP_LENGTH)
+    frames = max(1, int(duration_sec * sr / hop))
+    onset = np.zeros(frames, dtype=float)
+    for p in points:
+        frame = int(p["time_sec"] * sr / hop)
+        if 0 <= frame < frames:
+            onset[frame] = max(onset[frame], float(p["probability"]))
+    if onset.max() > 0:
+        onset = onset / onset.max()
+    else:
+        onset[:] = 0.3
+    bands = {"low": onset.copy(), "mid": onset.copy(), "high": onset.copy()}
+    rms = onset.copy()
+    times = np.arange(frames) * hop / sr
+
+    # 用每窗口的 points 密度推断段落标签
+    window_sec = SECTION_WINDOW * 60.0 / max(bpm, 1.0)
+    n = max(1, int(round(duration_sec / window_sec))) if window_sec else 1
+    counts = [0] * n
+    for p in points:
+        idx = min(n - 1, int(p["time_sec"] / window_sec)) if window_sec else 0
+        counts[idx] += 1
+    nps = [c / window_sec for c in counts]
+    med = statistics.median(nps) if nps else 0.0
+    sections = []
+    for i in range(n):
+        start = i * window_sec
+        end = min((i + 1) * window_sec, duration_sec)
+        v = nps[i]
+        if med > 0 and v < med * 0.6:
+            label, density = "intro/break", DENSITY_LOW
+        elif med > 0 and v < med * 1.3:
+            label, density = "verse", DENSITY_MID
+        else:
+            label, density = "chorus", DENSITY_HIGH
+        sections.append({"start_time": start, "end_time": end, "label": label, "density": density})
+
+    return {"y": None, "sr": sr, "onset_norm": onset, "bands": bands,
+            "rms": rms, "rms_norm": rms, "times": times, "sections": sections}
+
+
+# ── 公共：多难度打包 ──────────────────────────────────────────────────────────
+def _build_tiers(result, audio, *, audio_path, name, artist, charter_name, image_path,
+                 outdir, difficulty, all_tiers, key_mode, disable_drag,
+                 tap_weight, hold_weight, flick_weight, drag_weight, density_mult,
+                 line_fx, pulse_style, deco_when, main_y, mix_spec, main_swing,
+                 sweep_flick_only) -> dict:
     log = []
     started = time.perf_counter()
-    audio_path = str(Path(audio_path))
-    audio_stem = _safe_stem(Path(audio_path).stem)
-    outdir = Path(outdir or Path(__file__).parent / "output")
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    log.append("[1/3] 音频检测（节拍 / 音符起点）...")
-    result = detect_result(audio_path, bpm=bpm)
-    log.append(f"      踩音 {len(result['points'])} 点 | bpm={result['bpm']:.2f} | "
-               f"offset={result['offset_sec']:.3f}s | duration={result['duration_sec']:.1f}s")
-
-    log.append("[2/3] 音频分段落 / 频段分析 ...")
-    audio = analyze_audio(audio_path, bpm=result["bpm"], duration_sec=result["duration_sec"])
     log.append(f"      段落 {len(audio['sections'])} | 已完成")
-
-    name = (title or Path(audio_path).stem).strip()
-    artist = artist or "Unknown"
-    charter_name = charter_name or "audio2pez"
 
     tiers = list(DIFFICULTY_PRESETS.keys()) if all_tiers else [difficulty]
     results = {}
@@ -155,7 +227,7 @@ def generate(
         log.append(f"      {presets['label']} {presets['level']}: {len(notes)} notes")
 
         chart_id = f"{_safe_id(name)}_{tier}"
-        ext = Path(audio_path).suffix.lower() or ".mp3"
+        ext = Path(audio_path).suffix.lower() or ".mp3" if audio_path else ".mp3"
         mp3_name = f"{chart_id}{ext}"
         img_name = f"{chart_id}.png"
         meta = {
@@ -181,6 +253,122 @@ def generate(
         save_json(chart, str(outdir))
         results[tier] = str(pez_path)
 
-    elapsed = time.perf_counter() - started
-    log.append(f"完成，耗时 {elapsed:.1f}s")
+    log.append(f"完成，耗时 {time.perf_counter() - started:.1f}s")
     return {"results": results, "log": "\n".join(log)}
+
+
+def _finalize_outdir(outdir, audio_path):
+    if outdir:
+        d = Path(outdir)
+    else:
+        d = Path(__file__).parent / "output"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def generate(
+    audio_path: str,
+    difficulty: str = "hard",
+    bpm: float = None,
+    all_tiers: bool = False,
+    image_path: str = None,
+    title: str = None,
+    artist: str = "",
+    charter_name: str = None,
+    outdir: str = None,
+    density_mult: float = 1.0,
+    line_fx: str = "none",
+    pulse_style: str = "chain",
+    deco_when: str = "intro_chorus",
+    main_y: float = -300.0,
+    mix_spec: str = "",
+    key_mode: str = "auto",
+    main_swing: bool = None,
+    sweep_flick_only: bool = False,
+    disable_drag: bool = False,
+    tap_weight: float = None,
+    hold_weight: float = None,
+    flick_weight: float = None,
+    drag_weight: float = None,
+) -> dict:
+    """从音频直接生成。"""
+    audio_path = str(Path(audio_path))
+    outdir = _finalize_outdir(outdir, audio_path)
+    log = ["[1/3] 音频检测（节拍 / 音符起点）..."]
+    result = detect_result(audio_path, bpm=bpm)
+    log.append(f"      踩音 {len(result['points'])} 点 | bpm={result['bpm']:.2f} | "
+               f"offset={result['offset_sec']:.3f}s | duration={result['duration_sec']:.1f}s")
+    log.append("[2/3] 音频分段落 / 频段分析 ...")
+    audio = analyze_audio(audio_path, bpm=result["bpm"], duration_sec=result["duration_sec"])
+    name = (title or Path(audio_path).stem).strip()
+    artist = artist or "Unknown"
+    charter_name = charter_name or "audio2pez"
+    out = _build_tiers(
+        result, audio, audio_path=audio_path, name=name, artist=artist,
+        charter_name=charter_name, image_path=image_path, outdir=outdir,
+        difficulty=difficulty, all_tiers=all_tiers, key_mode=key_mode,
+        disable_drag=disable_drag, tap_weight=tap_weight, hold_weight=hold_weight,
+        flick_weight=flick_weight, drag_weight=drag_weight, density_mult=density_mult,
+        line_fx=line_fx, pulse_style=pulse_style, deco_when=deco_when, main_y=main_y,
+        mix_spec=mix_spec, main_swing=main_swing, sweep_flick_only=sweep_flick_only,
+    )
+    out["log"] = "\n".join(log + out["log"].splitlines())
+    return out
+
+
+def arrange(
+    points_dict,
+    audio_path: str = None,
+    difficulty: str = "hard",
+    bpm: float = None,
+    all_tiers: bool = False,
+    image_path: str = None,
+    title: str = None,
+    artist: str = "",
+    charter_name: str = None,
+    outdir: str = None,
+    density_mult: float = 1.0,
+    line_fx: str = "none",
+    pulse_style: str = "chain",
+    deco_when: str = "intro_chorus",
+    main_y: float = -300.0,
+    mix_spec: str = "",
+    key_mode: str = "auto",
+    main_swing: bool = None,
+    sweep_flick_only: bool = False,
+    disable_drag: bool = False,
+    tap_weight: float = None,
+    hold_weight: float = None,
+    flick_weight: float = None,
+    drag_weight: float = None,
+) -> dict:
+    """给定已踩音 points（dict 或 list），自动排布 notes 并打包 .pez。
+
+    如果同时提供 audio_path，则用真实音频做频段/onset/段落分析（类型/选轨更准）；
+    否则用 points 推断段落与能量（仍能排布，只是类型/轨道的音乐感弱一些）。
+    """
+    result = coerce_points_dict(points_dict, bpm=bpm)
+    outdir = _finalize_outdir(outdir, audio_path)
+    log = ["[1/3] 已提供踩音 points，跳过音频检测"]
+    log.append(f"      {len(result['points'])} 点 | bpm={result['bpm']:.2f} | "
+               f"offset={result['offset_sec']:.3f}s | duration={result['duration_sec']:.1f}s")
+    if audio_path:
+        log.append("[2/3] 音频分段落 / 频段分析 ...")
+        audio = analyze_audio(audio_path, bpm=result["bpm"], duration_sec=result["duration_sec"])
+    else:
+        log.append("[2/3] 无音频，由 points 推断段落/能量 ...")
+        audio = fallback_audio(result["points"], result["bpm"], result["duration_sec"])
+    name = (title or (Path(audio_path).stem if audio_path else "chart")).strip()
+    artist = artist or "Unknown"
+    charter_name = charter_name or "audio2pez"
+    out = _build_tiers(
+        result, audio, audio_path=audio_path or "", name=name, artist=artist,
+        charter_name=charter_name, image_path=image_path, outdir=outdir,
+        difficulty=difficulty, all_tiers=all_tiers, key_mode=key_mode,
+        disable_drag=disable_drag, tap_weight=tap_weight, hold_weight=hold_weight,
+        flick_weight=flick_weight, drag_weight=drag_weight, density_mult=density_mult,
+        line_fx=line_fx, pulse_style=pulse_style, deco_when=deco_when, main_y=main_y,
+        mix_spec=mix_spec, main_swing=main_swing, sweep_flick_only=sweep_flick_only,
+    )
+    out["log"] = "\n".join(log + out["log"].splitlines())
+    return out
