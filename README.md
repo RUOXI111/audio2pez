@@ -1,7 +1,24 @@
 # audio2pez — 音频转 PhiraEdit 谱面生成器
 
+![Audio2Phira 桌面界面](.desktop/desktop_preview.png)
+
 把任意音频文件（.mp3 / .wav / .ogg / .flac）自动分析并生成 RPE (Re:PhiEdit) 格式的 Phira 谱面（.pez）。
 只依赖 librosa / numpy 等通用音频库，完全离线运行。
+
+## 桌面版
+
+不想敲命令行就用桌面界面：解压发布包 → 双击 `Setup.vbs` 装环境（勾「离线模式」，无需联网）→ 双击桌面快捷方式启动。
+
+界面是 Tkinter 原生窗口，皮肤参考《Muse Dash》：糖果霓虹配色、粗黑描边控件、渐变头图、会眨眼的小恶魔角色。生成逻辑与 CLI 完全一致，**没有改动任何算法**。
+
+- 完整安装包：[Releases](https://github.com/RUOXI111/audio2pez/releases/latest)（约 411 MB，内含 Python 3.12.10 安装包与 28 个离线依赖 wheel）
+- 界面实现：[`anime_theme.py`](anime_theme.py) / [`desktop_app.py`](desktop_app.py)
+- 安装器皮肤：[`installer_gui.ps1`](installer_gui.ps1)
+- 图标生成：[`make_icon.py`](make_icon.py)
+- 改动清单与回滚方法：[`UI_CHANGES.md`](UI_CHANGES.md)
+- 给接收方的图文步骤：[`首次使用说明.txt`](首次使用说明.txt)
+
+系统要求：Windows 10 / 11 64 位。安装不需要管理员权限，也不包含 Phira 游戏本体。
 
 ## 特性
 
