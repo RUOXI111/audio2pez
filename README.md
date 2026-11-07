@@ -1,4 +1,4 @@
-﻿# audio2pez — 音频转 PhiraEdit 谱面生成器
+# audio2pez — 音频转 PhiraEdit 谱面生成器
 
 把任意音频文件（.mp3 / .wav / .ogg / .flac）自动分析并生成 RPE (Re:PhiEdit) 格式的 Phira 谱面（.pez）。
 只依赖 librosa / numpy 等通用音频库，完全离线运行。
@@ -59,6 +59,7 @@ python main.py song.mp3 --bpm-only
 | `--line-fx` | str | `none` | 判定线动效 |
 | `--density` | float | `1.0` | 写谱密度 / 难度倍率（0.7~1.6） |
 | `--outdir` | str | `output` | 输出目录 |
+| `--chorus` | str | 自动检测 | 手动副歌范围，例如 `"0:51.3-1:25.5,2:22.6-2:57.5"`，支持秒或分:秒 |
 
 此外可用 `--tap-weight / --hold-weight / --flick-weight / --drag-weight` 覆盖各难度音符类型权重。
 

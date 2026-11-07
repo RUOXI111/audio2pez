@@ -227,6 +227,23 @@ class Charter:
 
     # ── 密度补充（提高 NPS，细分到 1/8~1/16/1/32 网格）──
 
+    def _fill_threshold(self, start_t: float, end_t: float, key: str) -> float:
+        """补点所需的最低 onset 强度。
+
+        原先固定 0.10（相对全曲最大值）。副歌混音满、onset 被"抹平"，全局阈值下几乎没有
+        可补位置，导致副歌反而比主歌稀（小半实测副歌 8% 网格位达标、其余段 14%）。
+        改为取段内分位数与 0.10 的较小者：dense 段取 50 分位、其余 70 分位，下限 0.04。
+        """
+        sr_hop = self.sr / HOP_LENGTH
+        lo = max(0, int(start_t * sr_hop))
+        hi = min(len(self.onset_norm), int(end_t * sr_hop))
+        if hi - lo < 8:
+            return 0.10
+        vals = sorted(float(v) for v in self.onset_norm[lo:hi])
+        q = 0.50 if key == "dense" else 0.70
+        local = vals[min(len(vals) - 1, int(q * len(vals)))]
+        return max(0.04, min(0.10, local))
+
     def _density_fill(self, selected: list) -> list:
         gap_sec = self.min_gap_ms / 1000.0
         gap_beats = float(self.difficulty.get("min_gap_beats", 0.0))
@@ -259,6 +276,7 @@ class Charter:
             start_tick = self._tick_at_time(start_t)
             end_tick = self._tick_at_time(end_t)
             base_times = [p["time_sec"] for p in selected if start_t <= p["time_sec"] < end_t]
+            fill_th = self._fill_threshold(start_t, end_t, key)
             base_per_beat = {}
             for p in selected:
                 if start_t <= p["time_sec"] < end_t:
@@ -283,7 +301,7 @@ class Charter:
                         ts = self._time_at_tick(tick)
                         # 只补在有真实 onset 能量的位置，避免凭空生拍
                         if (not any(abs(ts - bt) < gap_sec for bt in base_times)
-                                and self._onset_at(ts) >= 0.10):
+                                and self._onset_at(ts) >= fill_th):
                             beat_cand.append((self._onset_at(ts), tick, ts))
                     tick += step_i
                 beat_cand.sort(key=lambda x: -x[0])

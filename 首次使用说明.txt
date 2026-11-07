@@ -1,0 +1,124 @@
+﻿Audio2Phira · 首次使用说明
+================================
+
+一个本地制谱工具：把音频（MP3 / WAV / OGG / FLAC / M4A / AAC）自动转成
+Phira / Phigros 的 .pez 谱面。全程在本机运行，不联网、不上传文件。
+
+系统要求：Windows 10 / 11，64 位。不需要管理员权限。
+
+
+一、解压
+------------------------
+1. 右键点击 audio2pez.zip →「全部解压缩」（WinRAR / 7-Zip 也行）。
+   注意要真正解压出文件夹，只在压缩包里双击是不行的。
+2. 建议解压到全英文、无空格的路径，例如：
+       D:\Audio2Phira
+   避免放在中文路径或 OneDrive 同步目录下。
+3. 解压完成后，会得到一个 audio2pez 文件夹，里面有：
+       Setup.vbs            环境安装
+       launch_desktop.vbs   启动程序
+       desktop_app.py       主程序
+       anime_theme.py       界面主题
+       songs\               示例素材
+       wheels\              离线依赖包
+       .setup\              安装缓存
+   请直接在这个文件夹里操作，不要随意移动其中的文件。
+
+
+二、安装环境（只做一次，换电脑后要重做）
+------------------------
+双击  Setup.vbs
+
+会弹出「Audio2Phira · 一键环境安装」窗口：
+
+  1. 勾选「离线模式」（包内已经带了 Python 安装包和全部依赖，
+     勾上就不需要联网，速度也更快）。
+  2. 点击「安装 / 修复环境」。
+  3. 等待日志滚完，看到下面这行就成功了：
+         SETUP_OK Installation and environment checks completed.
+
+正常情况下 1 ~ 4 分钟。期间会：
+
+  · 检查电脑上有没有 Python 3.12.10（64 位）；
+  · 没有就静默安装到 %LOCALAPPDATA%\Programs\Audio2Phira\Python312
+    （这个安装包是 Python 官方版本，已校验数字签名）；
+  · 创建专用环境 .venv，并从 wheels\ 目录离线安装 28 个依赖
+    （numpy / scipy / librosa / PyAV 等）；
+  · 做四项健康检查；
+  · 在桌面上创建两个快捷方式：
+        Audio2Phira 本地制谱    ← 以后用它启动
+        Audio2Phira 环境安装    ← 出问题时用它修
+
+注意：如果安装前程序正在运行，请先关掉，否则会提示
+「Close Audio2Phira and all running generation tasks before repairing」。
+
+
+三、启动使用
+------------------------
+双击桌面上的  Audio2Phira 本地制谱
+
+或者直接在项目文件夹里双击  launch_desktop.vbs
+
+主界面四个标签页：
+
+  歌曲与谱面   选音频、封面，填标题 / 曲师 / 谱师，选模式和难度
+  高级设置     BPM、高潮区间、打点 JSON、偏移、预览时长（多数情况留空即可）
+  生成结果    完成后在这里看谱面、播放音频预览、打开输出文件夹
+  运行日志    实时输出，出问题先看这里
+
+操作顺序：选音频 → 选输出目录 → 点「开始生成」→ 完成后在
+「生成结果」里点「定位选中谱面」，把 .pez 文件拖进 Phira 导入。
+
+提示：
+  · 每次生成都会在输出目录下新建独立子文件夹，历史结果不会被覆盖。
+  · 这个工具不包含 Phira 本体，请自行准备游戏。
+  · 自动生成的谱面仍建议在游戏里试听、试玩、手动微调。
+
+
+四、常见问题
+------------------------
+Q: 双击启动没反应 / 一闪就没
+A: 先双击 launch_desktop.cmd（会保留控制台窗口，能看到报错）。
+   再看 .desktop\startup.log 和 .setup\logs\ 里的日志。
+
+Q: 提示缺少 Python / 环境不可用
+A: 运行 Setup.vbs，勾「离线模式」+「强制重建环境（先备份旧 .venv）」，
+   再点「安装 / 修复环境」。旧环境会被改名成
+   .venv-backup-年月日-时分秒-毫秒 保留在旁边，确认新环境正常后可以删掉。
+
+Q: 安装时杀毒软件报警
+A: Setup.vbs 使用 PowerShell 运行安装脚本，部分杀软会提示脚本执行。
+   允许即可（脚本内容都在项目文件夹内，可自行打开查看）。
+
+Q: 装完发现磁盘占用变大
+A: .venv-backup-* 是安装前的旧环境备份，确认新环境正常后可以直接删除。
+
+Q: 想恢复成默认设置
+A: 关闭程序，删除 .desktop\settings.json 再启动即可。
+
+Q: 想换回旧版界面
+A: 把 .desktop\backup\desktop_app.py.orig 覆盖为 desktop_app.py，
+   并删除 anime_theme.py。备份目录里还有原版图标 app.ico.orig。
+
+
+五、卸载 / 彻底清理
+------------------------
+这个工具没有注册表安装项，直接删除整个 audio2pez 文件夹即可。
+另外可选删除：
+    %LOCALAPPDATA%\Programs\Audio2Phira\Python312   （装过的 Python）
+    桌面上的两个快捷方式
+
+
+六、文件说明（给好奇的人）
+------------------------
+desktop_app.py   主界面（Tkinter），负责交互与任务派发
+anime_theme.py   界面主题：配色、ttk 样式、渐变头图、小恶魔角色
+desktop_worker.py 后台工作进程，被主界面调用，负责实际生成
+generate.py      谱面生成主流程
+charter.py       排谱核心算法
+line_fx.py       判定线演出效果
+packager.py      打包 .pez
+songs\           示例音频
+output\          历史生成结果示例
+wheels\          离线依赖（28 个已校验的 wheel）
+.setup\cache\    官网 Python 安装包缓存

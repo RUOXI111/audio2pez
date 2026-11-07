@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """audio2pez 命令行入口。
 
 两种模式：
@@ -57,7 +57,18 @@ def main(argv=None):
     parser.add_argument("--hold-weight", type=float, default=None)
     parser.add_argument("--flick-weight", type=float, default=None)
     parser.add_argument("--drag-weight", type=float, default=None)
+    parser.add_argument("--chorus", default=None,
+                        help="手动指定副歌区间（秒或 分:秒，逗号分隔），如 \"51.3-85.5, 2:22.6-2:57.5\"；"
+                             "指定后区间内按副歌排布，区间外不再判为副歌")
     args = parser.parse_args(argv)
+
+    if args.chorus:
+        from audio_analyze import parse_time_ranges
+        try:
+            parse_time_ranges(args.chorus)
+        except ValueError as e:
+            print(f"错误: --chorus {e}", file=sys.stderr)
+            return 1
 
     common = dict(
         difficulty=args.difficulty,
@@ -79,6 +90,7 @@ def main(argv=None):
         hold_weight=args.hold_weight,
         flick_weight=args.flick_weight,
         drag_weight=args.drag_weight,
+        chorus=args.chorus,
     )
 
     if args.from_points:

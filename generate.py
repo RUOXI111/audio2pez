@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """audio2pez 流水线：音频检测 -> 频谱/段落分析 -> 难度分级排布 -> 打包 .pez。
 
 也可以只提供“踩音”后的音符时序 points（不再检测音频），由 charter 自动排布成谱面。
@@ -18,7 +18,7 @@ from config import (
     DENSITY_LOW, DENSITY_MID, DENSITY_HIGH,
 )
 from detector import detect_result
-from audio_analyze import analyze_audio
+from audio_analyze import analyze_audio, parse_time_ranges
 from charter import Charter
 from packager import build_chart_json, pack_pez, save_json
 
@@ -180,6 +180,49 @@ def fallback_audio(points: list, bpm: float, duration_sec: float) -> dict:
             "rms": rms, "rms_norm": rms, "times": times, "sections": sections}
 
 
+def _apply_chorus_override(sections: list, chorus) -> None:
+    """无音频兜底：按段中点落在手动副歌区间内的改为 chorus，其余 chorus 降为 verse。"""
+    ranges = parse_time_ranges(chorus)
+    for s in sections:
+        mid = (s["start_time"] + s["end_time"]) / 2.0
+        if any(a <= mid < b for a, b in ranges):
+            s["label"], s["density"] = "chorus", DENSITY_HIGH
+        elif s["label"] == "chorus":
+            s["label"], s["density"] = "verse", DENSITY_MID
+
+
+def _sections_summary(sections: list, chorus) -> str:
+    runs = []
+    for s in sections:
+        if runs and runs[-1][0] == s["label"]:
+            runs[-1][2] = s["end_time"]
+        else:
+            runs.append([s["label"], s["start_time"], s["end_time"]])
+    ch = [f"{a:.1f}-{b:.1f}s" for lab, a, b in runs if lab == "chorus"]
+    src = "手动" if chorus else "自动"
+    return f"      副歌({src}) {len(ch)} 段: " + (", ".join(ch[:8]) + (" …" if len(ch) > 8 else "") if ch else "无")
+
+
+def _chart_offset_ms(result) -> int:
+    """RPE META.offset：Phira 在 音频时间 = 谱面时间 + offset 处判定音符。
+
+    从 points 的 time_sec 与 beat_tick 反推时间原点，避免对绝对时间 tick 再加一次首拍偏移。
+    绝对 tick 得 0；检测器现在输出相对拍网格相位的 tick，得到该相位；外部 JSON 的相对
+    tick 也得到对应偏移。该推断适用于恒定 BPM 数据。
+    """
+    pts = result.get("points") or []
+    bpm = float(result.get("bpm") or 0.0)
+    tpb = int(result.get("ticks_per_beat") or 480)
+    if not pts or bpm <= 0:
+        return 0
+    diffs = [float(p["time_sec"]) - float(p["beat_tick"]) / tpb * 60.0 / bpm
+             for p in pts if "beat_tick" in p and "time_sec" in p]
+    if not diffs:
+        return 0
+    off = statistics.median(diffs)
+    return int(round(off * 1000.0)) if abs(off) >= 0.005 else 0
+
+
 # ── 公共：多难度打包 ──────────────────────────────────────────────────────────
 def _build_tiers(result, audio, *, audio_path, name, artist, charter_name, image_path,
                  outdir, difficulty, all_tiers, key_mode, disable_drag,
@@ -239,7 +282,7 @@ def _build_tiers(result, audio, *, audio_path, name, artist, charter_name, image
             "illustration": artist or "",
             "song": mp3_name,
             "background": img_name,
-            "offset": int(round(float(result["offset_sec"]) * 1000.0)),
+            "offset": _chart_offset_ms(result),
             "duration": float(result["duration_sec"]),
         }
         line_fx_cfg = _build_line_fx(line_fx, audio["sections"], pulse_style, deco_when,
@@ -290,6 +333,7 @@ def generate(
     hold_weight: float = None,
     flick_weight: float = None,
     drag_weight: float = None,
+    chorus: str = None,
 ) -> dict:
     """从音频直接生成。"""
     audio_path = str(Path(audio_path))
@@ -299,7 +343,9 @@ def generate(
     log.append(f"      踩音 {len(result['points'])} 点 | bpm={result['bpm']:.2f} | "
                f"offset={result['offset_sec']:.3f}s | duration={result['duration_sec']:.1f}s")
     log.append("[2/3] 音频分段落 / 频段分析 ...")
-    audio = analyze_audio(audio_path, bpm=result["bpm"], duration_sec=result["duration_sec"])
+    audio = analyze_audio(audio_path, bpm=result["bpm"], duration_sec=result["duration_sec"],
+                          chorus_ranges=chorus)
+    log.append(_sections_summary(audio["sections"], chorus))
     name = (title or Path(audio_path).stem).strip()
     artist = artist or "Unknown"
     charter_name = charter_name or "audio2pez"
@@ -341,6 +387,7 @@ def arrange(
     hold_weight: float = None,
     flick_weight: float = None,
     drag_weight: float = None,
+    chorus: str = None,
 ) -> dict:
     """给定已踩音 points（dict 或 list），自动排布 notes 并打包 .pez。
 
@@ -354,10 +401,14 @@ def arrange(
                f"offset={result['offset_sec']:.3f}s | duration={result['duration_sec']:.1f}s")
     if audio_path:
         log.append("[2/3] 音频分段落 / 频段分析 ...")
-        audio = analyze_audio(audio_path, bpm=result["bpm"], duration_sec=result["duration_sec"])
+        audio = analyze_audio(audio_path, bpm=result["bpm"], duration_sec=result["duration_sec"],
+                              chorus_ranges=chorus)
     else:
         log.append("[2/3] 无音频，由 points 推断段落/能量 ...")
         audio = fallback_audio(result["points"], result["bpm"], result["duration_sec"])
+        if chorus:
+            _apply_chorus_override(audio["sections"], chorus)
+    log.append(_sections_summary(audio["sections"], chorus))
     name = (title or (Path(audio_path).stem if audio_path else "chart")).strip()
     artist = artist or "Unknown"
     charter_name = charter_name or "audio2pez"

@@ -74,14 +74,20 @@ def detect_result(audio_path: str, bpm: float | None = None) -> dict:
     # 若无 onset，则退回用 beats 作为候选时序
     times = onset_times if onset_times.size else beat_times
 
+    # 拍网格相位：tick 0 对齐到第一拍（取首拍对一拍周期的余数），而不是 0 秒。
+    # 否则加密补点用的 1/8、1/16 网格会整体偏离真实节拍（小半实测偏 ~85ms）。
+    # 对应地 META.offset = 该相位，由 generate._chart_offset_ms 从 points 反推。
+    period = 60.0 / bpm
+    phase = float(beat_times[0]) % period if beat_times.size else 0.0
+
     points = []
     for t in times:
         t = float(t)
-        if t < 0:
+        if t < phase:
             continue
         frame = int(t * sr / HOP_LENGTH)
         prob = float(onset_norm[min(frame, len(onset_norm) - 1)]) if onset_norm.size else 0.3
-        beat_f = t * bpm / 60.0
+        beat_f = (t - phase) * bpm / 60.0
         tick = int(round(beat_f * TICKS_PER_BEAT))
         beat = tick / TICKS_PER_BEAT
         points.append({
@@ -92,7 +98,7 @@ def detect_result(audio_path: str, bpm: float | None = None) -> dict:
             "snap_status": 1,
         })
 
-    offset_sec = float(beat_times[0]) if beat_times.size else 0.0
+    offset_sec = phase
     return {
         "bpm": float(bpm),
         "bpm_changes": [],

@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -14,8 +14,35 @@ output_easy/
 *.flac
 *.jpg
 *.jpeg
-*.png
 *.pez
+
+# Images: keep only the ones the app itself needs
+*.png
+!.desktop/*.png
+
+# Local runtime environment (rebuild with Setup.vbs)
+.venv/
+.venv-backup-*/
+.venv-failed-*/
+
+# Installer cache: 26 MB Python installer, fetched on demand
+.setup/
+
+# Offline wheels: ~130 MB, setup_dependencies.py downloads them when missing
+wheels/
+
+# Game binary, installed separately
+Phira/
+
+# Local state
+.desktop/settings.json
+.desktop/ui_test_settings.json
+.desktop/startup.log
+.desktop/jobs/
+.desktop/backup/
+
+# Distribution archives
+*.zip
 
 # IDE
 .vscode/
